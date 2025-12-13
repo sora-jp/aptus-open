@@ -2,7 +2,7 @@ from aiohttp import web
 import asyncio
 import argparse
 import logging
-from lib import DoorControl, Secrets, AuthenticationError
+from aptus_open.lib import DoorControl, Secrets, AuthenticationError
 
 log = logging.getLogger("web")
 
@@ -55,4 +55,5 @@ async def main():
         while True:
             await asyncio.sleep(1)
 
-asyncio.run(main())
+def sync_main():
+    asyncio.run(main())

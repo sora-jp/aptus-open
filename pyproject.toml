@@ -1,0 +1,22 @@
+[tool.poetry]
+name = "aptus-open"
+version = "0.1.0"
+description = ""
+authors = ["Xenia Lööv", "Oskar Tornevall"]
+# readme = "README.md"
+# license = "BSD"
+packages = [
+  { include = "aptus_open" }
+]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+aiohttp = "^3.13.2"
+toml = "^0.10.2"
+
+[tool.poetry.scripts]
+aptus_open = "aptus_open.main:sync_main"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

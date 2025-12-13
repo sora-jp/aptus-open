@@ -1,34 +1,33 @@
 {
-  description = "A bare minimum flake";
+  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+  inputs.poetry2nix.url = "github:nix-community/poetry2nix";
 
-  inputs = {
-    flake-utils.url = "github:numtide/flake-utils";
-  };
+  outputs = { self, nixpkgs, poetry2nix }:
+    let
+      supportedSystems = [ "x86_64-linux" ];
+      forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
+      pkgs = forAllSystems (system: nixpkgs.legacyPackages.${system});
+      over = p: final: prev: {
+        aiohttp = p.python313Packages.aiohttp;
+      };
+    in
+    {
+      packages = forAllSystems (system: let
+        inherit (poetry2nix.lib.mkPoetry2Nix { pkgs = pkgs.${system}; }) mkPoetryApplication;
+      in {
+        default = mkPoetryApplication { projectDir = self; };
+      });
 
-  outputs = { self, nixpkgs, flake-utils }:
-    flake-utils.lib.eachDefaultSystem (sys:
-      let pkgs = import nixpkgs { system = sys; };
-          python = pkgs.python313.withPackages (ps: [ ps.ipython ps.aiohttp ps.toml ]);
-      in rec {
-        devShells.default = pkgs.mkShell {
-          packages = [ python ];
+      devShells = forAllSystems (system: let
+        inherit (poetry2nix.lib.mkPoetry2Nix { pkgs = pkgs.${system}; }) mkPoetryEnv overrides;
+      in {
+        default = pkgs.${system}.mkShellNoCC {
+          packages = with pkgs.${system}; [
+            (mkPoetryEnv { projectDir = self; overrides = overrides.withDefaults (over pkgs.${system}); })
+            poetry
+            pyright
+          ];
         };
-
-        packages.aptus-open = pkgs.stdenv.mkDerivation (self: {
-          name = "aptus-open";
-          src = ./. ;
-
-          buildPhase = ''
-            mkdir -p $out/bin
-            cp -r $src/* $out/bin/
-            rm $out/bin/secrets.toml.sample
-            cat > $out/bin/${self.name} <<'EOF'
-            #!/bin/sh
-            ${python}/bin/python "$(dirname "$0")"/main.py "$@"
-            EOF
-            chmod a+x $out/bin/${self.name}
-          '';
-        });
-      }
-    );
+      });
+    };
 }
