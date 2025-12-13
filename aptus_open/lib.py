@@ -65,19 +65,11 @@ class DoorControl:
         self.log.debug("Initializing (__aenter__)")
         await self.sess.__aenter__()
         await self.relogin()
-        self.relogin_task = asyncio.create_task(self.relogin_forever())
         return self
 
     async def __aexit__(self, exc_type, exc, tb):
         self.log.debug("Terminating (__aexit__)")
         await self.sess.__aexit__(exc_type, exc, tb)
-        self.relogin_task.cancel()
-
-    async def relogin_forever(self, wait_time=4*60):
-        self.log.debug(f"Starting relogin loop with wait time {wait_time} s")
-        while True:
-            await asyncio.sleep(wait_time)
-            await self.relogin()
 
     async def relogin(self):
         self.log.info(f"Getting new credentials")
@@ -93,18 +85,23 @@ class DoorControl:
         self.log.debug(f"Got aptus credentials")
 
         # swap them out
-        async with self.lock:
-            old_sess = self.sess
-            self.sess = login_sess
+        old_sess = self.sess
+        self.sess = login_sess
 
         # cleanup old_sess
         await old_sess.__aexit__(None, None, None)
         self.log.info(f"Got new credentials")
 
-
     async def unlock_door(self, door: Door):
         self.log.info(f"Unlocking door {door}")
-        async with self.lock:
+
+        # This should always work, and only fetch a new session when necessary.
+        # However, this might break. YMMV
+        try:
+            await unlock_door(self.sess, door)
+        except AuthenticationError:
+            self.log.info("Session expired. Logging in again")
+            await self.relogin()
             await unlock_door(self.sess, door)
 
 async def login_csb(sess: aiohttp.ClientSession, secrets: Secrets):
