@@ -1,59 +1,106 @@
-from aiohttp import web
-import asyncio
+from dataclasses import dataclass
+from time import sleep
+import paho.mqtt.client as mqtt
+import json
 import argparse
 import logging
-from aptus_open.lib import DoorControl, Secrets, AuthenticationError
+from aptus_open.lib import Door, DoorControl, Secrets, AuthenticationError
 
 log = logging.getLogger("web")
 
-def routes(dc: DoorControl):
-    routes = web.RouteTableDef()
+@dataclass
+class MQTTUserdata:
+    device_descr: dict
+    dc: DoorControl
 
-    @routes.post("/unlock-door/{door_id}")
-    async def unlock_door(req: web.Request):
-        door_id = req.match_info["door_id"]
-        matching_doors = [door for door in dc.secrets.doors if door.name == door_id]
-        if len(matching_doors) == 0:
-            log.error(f"Request for unknown door {door_id}")
-            return web.Response(text="no such door", status=404)
-        if len(matching_doors) > 1:
-            log.error(f"Multiple doors matching {door_id!r}: {matching_doors!r}")
-            return web.Response(text="many doors matching id", status=500)
+def make_door_btn_entry(door: Door):
+    door_discovery_obj = {
+        "p": "button",
+        "name": f"Open {door.name}",
+        "payload_press": f"open_{door.id}",
+        "unique_id": f"apto_open_{door.id}",
+    }
 
-        door = matching_doors[0]
-        log.info(f"Opening {door!r}")
+    if door.icon != None:
+        door_discovery_obj["icon"] = door.icon
+    else:
+        door_discovery_obj["icon"] = "mdi:lock-open-variant"
 
-        try:
-            await dc.unlock_door(door)
+    return door_discovery_obj
 
-            return web.Response(text="success")
-        except AuthenticationError as e:
-            log.error(f"Failed to open door: {e!r}")
-            return web.Response(text="fail", status=500)
+def make_door_sens_entry(door: Door):
+    door_discovery_obj = {
+        "p": "binary_sensor",
+        "name": f"{door.name} is open",
+        "unique_id": f"apto_is_open_{door.id}",
+        "off_delay": 5,
+        "state_topic": f"home/aptus_open/{door.id}/state"
+    }
 
-    return routes
+    door_discovery_obj["icon"] = "mdi:door"
 
-async def main():
+    return door_discovery_obj
+
+def make_mqtt_cmps(secrets: Secrets):
+    cmps = {}
+    for door in secrets.doors:
+        cmps[f"door_{door.id}"] = make_door_btn_entry(door)
+        cmps[f"door_isopen_{door.id}"] = make_door_sens_entry(door)
+
+    return cmps
+
+def on_connect(client: mqtt.Client, userdata: MQTTUserdata, flags, reason_code, properties):
+    print(f"Connected with result code {reason_code}")
+    client.subscribe("$SYS/#")
+    client.subscribe(f"home/aptus_open/command")
+
+    client.publish(f"homeassistant/device/aptus_open/config", bytes(json.dumps(userdata.device_descr), "ascii"), qos=2, retain=True)
+    for door in userdata.dc.secrets.doors:
+        client.publish(f"home/aptus_open/{door.id}/state", b"OFF", qos=2, retain=True)
+
+def on_message(client: mqtt.Client, userdata: MQTTUserdata, msg):
+    if msg.topic != f"home/aptus_open/command":
+        return
+
+    print(msg.topic+" "+str(msg.payload))
+    if msg.payload.startswith(b"open_"):
+        door_id = str(msg.payload[5:], "ascii")
+        door = next(door for door in userdata.dc.secrets.doors if door.id == door_id)
+        userdata.dc.unlock_door(door)
+        client.publish(f"home/aptus_open/{door.id}/state", b"ON", qos=2, retain=False)
+
+def main():
     parser = argparse.ArgumentParser(prog="aptus-open")
-    parser.add_argument("-p", "--port", type=int, default=2138, help="port to listen on")
     parser.add_argument("-s", "--secrets-file", type=str, required=True, help="path to secrets toml-file")
 
     env = parser.parse_args()
-
     secrets = Secrets.from_toml_file(env.secrets_file)
 
-    async with DoorControl(secrets) as dc:
-        app = web.Application()
-        app.add_routes(routes(dc))
-        runner = web.AppRunner(app)
-        await runner.setup()
-        log.info(f"Listening on port {env.port}")
-        site = web.TCPSite(runner, "localhost", env.port)
-        await site.start()
+    device_descr = {
+        "dev": {
+            "ids": f"aptus_open",
+            "name": f"Aptus Open",
+            "mf": "SA6TRN",
+            "sn": f"no",
+            "sw": "1.0",
+            "hw": "1.0",
+        },
+        "o": {
+            "name": "Aptus Open",
+            "sw": "1.0",
+            "url": "https://blog.satrn.se/"
+        },
+        "command_topic": f"home/aptus_open/command",
+        "cmps": make_mqtt_cmps(secrets),
+        "qos": 2
+    }
 
-        # wait forever
-        while True:
-            await asyncio.sleep(1)
+    mqttc = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+    mqttc.on_connect = on_connect
+    mqttc.on_message = on_message
 
-def sync_main():
-    asyncio.run(main())
+    with DoorControl(secrets) as dc:
+        mqttc.user_data_set(MQTTUserdata(device_descr, dc))
+        mqttc.username_pw_set(secrets.mqtt_username, secrets.mqtt_password)
+        mqttc.connect(secrets.mqtt_ip, secrets.mqtt_port, 60)
+        mqttc.loop_forever()

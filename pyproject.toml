@@ -16,7 +16,7 @@ paho-mqtt = "^2.1.0"
 requests = "^2.32.5"
 
 [tool.poetry.scripts]
-aptus_open = "aptus_open.main:sync_main"
+aptus_open = "aptus_open.main:main"
 
 [build-system]
 requires = ["poetry-core"]

@@ -6,6 +6,7 @@ import json
 import time
 from dataclasses import dataclass
 import logging
+from typing import Optional
 
 logging.basicConfig(format="[%(asctime)s — %(name)s — %(levelname)s] %(message)s", level=logging.DEBUG)
 
@@ -22,29 +23,41 @@ class AuthenticationError(Exception):
 class Door:
     name: str
     id: str
+    icon: Optional[str]
 
     @staticmethod
     def from_obj(obj):
         return Door(
             name=obj["name"],
             id=obj["id"],
+            icon=obj["icon"] if "icon" in obj else None
         )
 
 @dataclass
 class Secrets:
-    login_username: str
-    login_password: str
+    csb_login_username: str
+    csb_login_password: str
+
+    mqtt_username: str
+    mqtt_password: str
+    mqtt_ip: str
+    mqtt_port: int
+
     doors: List[Door]
 
     def __str__(self):
-        return f"Secrets(login_username={self.login_username!r}, login_password=[redacted], doors={self.doors})"
+        return f"Secrets(login_username={self.csb_login_username!r}, login_password=[redacted], doors={self.doors})"
     __repr__ = __str__
 
     @staticmethod
     def from_secrets_obj(obj):
         return Secrets(
-            login_username=obj["csb-login"]["username"],
-            login_password=obj["csb-login"]["password"],
+            csb_login_username=obj["csb-login"]["username"],
+            csb_login_password=obj["csb-login"]["password"],
+            mqtt_username=obj["mqtt"]["username"],
+            mqtt_password=obj["mqtt"]["password"],
+            mqtt_ip=obj["mqtt"]["ip"],
+            mqtt_port=obj["mqtt"]["port"],
             doors=[Door.from_obj(door_obj) for door_obj in obj["doors"]],
         )
 
@@ -106,8 +119,8 @@ def login_csb(sess: requests.sessions.Session, secrets: Secrets):
     sess.post(
         "https://www.chalmersstudentbostader.se/wp-login.php",
         data={
-            "log": secrets.login_username,
-            "pwd": secrets.login_password,
+            "log": secrets.csb_login_username,
+            "pwd": secrets.csb_login_password,
             "redirect_to": "https://www.chalmersstudentbostader.se/mina-sidor/",
         },
     )
