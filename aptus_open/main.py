@@ -80,7 +80,7 @@ def main():
         "dev": {
             "ids": f"aptus_open",
             "name": f"Aptus Open",
-            "mf": "SA6TRN",
+            "mf": "SA6NYA/TRN",
             "sn": f"no",
             "sw": "1.0",
             "hw": "1.0",
@@ -88,7 +88,7 @@ def main():
         "o": {
             "name": "Aptus Open",
             "sw": "1.0",
-            "url": "https://blog.satrn.se/"
+            "url": "https://coral.shoes/"
         },
         "command_topic": f"home/aptus_open/command",
         "cmps": make_mqtt_cmps(secrets),
