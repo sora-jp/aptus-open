@@ -1,7 +1,6 @@
 from typing import List
 
-import aiohttp
-import asyncio
+import requests
 import toml
 import json
 import time
@@ -57,31 +56,30 @@ class Secrets:
 class DoorControl:
     def __init__(self, secrets: Secrets):
         self.secrets = secrets
-        self.sess = aiohttp.ClientSession()
-        self.lock = asyncio.Lock()
+        self.sess = requests.sessions.Session()
         self.log = logging.getLogger("DoorControl")
 
-    async def __aenter__(self):
-        self.log.debug("Initializing (__aenter__)")
-        await self.sess.__aenter__()
-        await self.relogin()
+    def __enter__(self):
+        self.log.debug("Initializing (__enter__)")
+        self.sess = self.sess.__enter__()
+        self.relogin()
         return self
 
-    async def __aexit__(self, exc_type, exc, tb):
-        self.log.debug("Terminating (__aexit__)")
-        await self.sess.__aexit__(exc_type, exc, tb)
+    def __exit__(self, exc_type, exc, tb):
+        self.log.debug("Terminating (__exit__)")
+        self.sess.__exit__(exc_type, exc, tb)
 
-    async def relogin(self):
+    def relogin(self):
         self.log.info(f"Getting new credentials")
 
         # create a new session
-        login_sess = aiohttp.ClientSession()
-        await login_sess.__aenter__()
+        login_sess = requests.sessions.Session()
+        login_sess.__enter__()
 
         self.log.debug(f"Started login session")
-        await login_csb(login_sess, self.secrets)
+        login_csb(login_sess, self.secrets)
         self.log.debug(f"Got CSB credentials")
-        await login_aptus(login_sess)
+        login_aptus(login_sess)
         self.log.debug(f"Got aptus credentials")
 
         # swap them out
@@ -89,23 +87,23 @@ class DoorControl:
         self.sess = login_sess
 
         # cleanup old_sess
-        await old_sess.__aexit__(None, None, None)
+        old_sess.__exit__(None, None, None)
         self.log.info(f"Got new credentials")
 
-    async def unlock_door(self, door: Door):
+    def unlock_door(self, door: Door):
         self.log.info(f"Unlocking door {door}")
 
         # This should always work, and only fetch a new session when necessary.
         # However, this might break. YMMV
         try:
-            await unlock_door(self.sess, door)
+            unlock_door(self.sess, door)
         except AuthenticationError:
             self.log.info("Session expired. Logging in again")
-            await self.relogin()
-            await unlock_door(self.sess, door)
+            self.relogin()
+            unlock_door(self.sess, door)
 
-async def login_csb(sess: aiohttp.ClientSession, secrets: Secrets):
-    await sess.post(
+def login_csb(sess: requests.sessions.Session, secrets: Secrets):
+    sess.post(
         "https://www.chalmersstudentbostader.se/wp-login.php",
         data={
             "log": secrets.login_username,
@@ -113,41 +111,42 @@ async def login_csb(sess: aiohttp.ClientSession, secrets: Secrets):
             "redirect_to": "https://www.chalmersstudentbostader.se/mina-sidor/",
         },
     )
-    if "Fast2User_ssoId" not in [c.key for c in sess.cookie_jar]:
+
+    if "Fast2User_ssoId" not in sess.cookies.keys():
         raise AuthenticationError("wp-login.php failed")
 
-async def login_aptus(sess: aiohttp.ClientSession):
-    data = await sess.get(
+def login_aptus(sess: requests.sessions.Session):
+    data = sess.get(
         "https://www.chalmersstudentbostader.se/widgets/",
         params={
             "callback": "mjau",
             "widgets[]": "aptuslogin@APTUSPORT",
         },
     )
-    if data.status != 200:
+    if data.status_code != 200:
         raise AuthenticationError("aptus login url @ /widgets/")
 
-    json_data = json.loads((await data.text())[5:-2])
+    json_data = json.loads(data.text[5:-2])
     try:
         aptus_url = json_data["data"]["aptuslogin@APTUSPORT"]["objekt"][0]["aptusUrl"]
     except ValueError as e:
         raise AuthenticationError("aptus login url @ /widgets/")
 
-    resp = await sess.get(aptus_url) # this sets login-cookies
-    if resp.status != 200:
+    resp = sess.get(aptus_url) # this sets login-cookies
+    if resp.status_code != 200:
         raise AuthenticationError("aptus login url")
 
-async def unlock_door(sess: aiohttp.ClientSession, door: Door):
-    resp = await sess.get(
+def unlock_door(sess: requests.sessions.Session, door: Door):
+    resp = sess.get(
         f"https://apt-www.chalmersstudentbostader.se/AptusPortal/Lock/UnlockEntryDoor/{door.id}",
     )
-    if resp.status != 200:
+    if resp.status_code != 200:
         raise AuthenticationError("/UnlockEntryDoor/")
 
 if __name__ == "__main__":
-    async def main():
+    def main():
         secrets = Secrets.from_toml_file("./secrets.toml")
-        async with DoorControl(secrets) as dc:
-            await dc.unlock_door(secrets.doors[0])
+        with DoorControl(secrets) as dc:
+            dc.unlock_door(secrets.doors[0])
 
-    asyncio.run(main())
+    main()

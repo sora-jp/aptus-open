@@ -8,7 +8,11 @@
       forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
       pkgs = forAllSystems (system: nixpkgs.legacyPackages.${system});
       over = p: final: prev: {
-        aiohttp = p.python313Packages.aiohttp;
+        charset-normalizer = p.python313Packages.charset-normalizer;
+        paho-mqtt = prev.paho-mqtt.overridePythonAttrs (p: {
+          buildInputs = (p.buildInputs or []) ++ [prev.hatchling];
+          preferWheel = true;
+        });
       };
     in
     {
