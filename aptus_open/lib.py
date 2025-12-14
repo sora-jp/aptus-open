@@ -150,9 +150,13 @@ def login_aptus(sess: requests.sessions.Session):
         raise AuthenticationError("aptus login url")
 
 def unlock_door(sess: requests.sessions.Session, door: Door):
-    resp = sess.get(
-        f"https://apt-www.chalmersstudentbostader.se/AptusPortal/Lock/UnlockEntryDoor/{door.id}",
-    )
+    try:
+        resp = sess.get(
+            f"https://apt-www.chalmersstudentbostader.se/AptusPortal/Lock/UnlockEntryDoor/{door.id}",
+        )
+    except requests.TooManyRedirects:
+        raise AuthenticationError("/UnlockEntryDoor/")
+
     if resp.status_code != 200:
         raise AuthenticationError("/UnlockEntryDoor/")
 
